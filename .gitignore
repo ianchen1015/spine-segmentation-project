@@ -1,6 +1,6 @@
 data/*
 weights/*
-darknet
+darknet/*
 
 .DS_Store
 .ipynb_checkpoints
