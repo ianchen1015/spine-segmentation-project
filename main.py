@@ -10,10 +10,11 @@ import numpy as np
 import random
 import re
 import tensorflow as tf
+import pickle
 
 size = 128
 
-def load_filenames(data_path, val_cases = {1}):
+def load_filenames(data_path, val_cases = {}):
     filenames = []
     for (dirpath, dirnames, filenames) in walk(data_path.format('x')):
         filenames.extend(filenames)
@@ -37,15 +38,26 @@ def save_weights(deeplab_model, weight_path):
         file.create_dataset('weight'+str(i),data=weight[i])
     file.close()
     
-def train(model_name, data_path, epochs, save_path = None, val_cases = {1}):
+def load_weights(deeplab_model, weight_path):
+    file=h5py.File(weight_path,'r')
+    weight = []
+    for i in range(len(file.keys())):
+        weight.append(file['weight'+str(i)][:])
+    deeplab_model.set_weights(weight)
     
-    if not os.path.exists('./weights/'):
-        os.makedirs('./weights/')
+def train(model_name, data_path, epochs, val_cases = {1}, cross = False):
+    
+    save_path = './cross_weights/' if cross else './weights/'
+    
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+        
     
     data_path = data_path + '/{}/'
     
-    training_filenames, validation_filenames = load_filenames(data_path, val_cases)
+    training_filenames, validation_filenames = load_filenames(data_path = data_path)
     
+    # Deeplab 3D
     if model_name == 'deeplab':
     
         from model3d import Deeplabv3
@@ -117,21 +129,53 @@ def train(model_name, data_path, epochs, save_path = None, val_cases = {1}):
                     y_out[i] = y
 
                 yield (x_out, y_out)
+        
+        if cross:
+            save_weights(deeplab_model, './cross_weights/model.deeplab.weights.init.h5')
+                
+        if cross:
+            folds = [
+                {1,2,3},
+                {4,5,6},
+                {7,8,9},
+                {10,18,19},
+                {20,22,23}
+            ]
+            
+            # 5 fold for segmentation network
+            for fold in folds:
+                print('======= Cross Validation: val = {} ======='.format(fold))
+                
+                training_filenames, validation_filenames = load_filenames(data_path = data_path, val_cases = fold)
+                
+                history = deeplab_model.fit_generator(  
+                    generator(1, training_filenames),
+                    steps_per_epoch=1,#400,
+                    validation_data=generator(2, validation_filenames),
+                    validation_steps = 1,#20,
+                    epochs=epochs)
+                
+                save_weights(deeplab_model, './cross_weights/model.deeplab.weights.cross_val_{}.h5'.format(fold))
 
-#         deeplab_model.fit_generator(  
-#             generator(1, training_filenames),
-#             steps_per_epoch=400,
-#             validation_data=generator(2, validation_filenames),
-#             validation_steps = 20,
-#             epochs=epochs)
-        
-        if save_path:
-            save_weights(deeplab_model, save_path)
+                with open('./cross_weights/deeplab.cross_val_{}.pkl'.format(fold), 'wb') as f:
+                    pickle.dump(history.history, f)
+                
+                load_weights(deeplab_model, './cross_weights/model.deeplab.weights.init.h5')
+                
         else:
+            history = deeplab_model.fit_generator(  
+                generator(1, training_filenames),
+                steps_per_epoch=400,
+                validation_data=generator(2, validation_filenames),
+                validation_steps = 20,
+                epochs=epochs)
+            
             save_weights(deeplab_model, './weights/model.deeplab.weights.last.h5')
-        
-        del(deeplab_model)
+            
+            with open('./weights/deeplab.pkl', 'wb') as f:
+                pickle.dump(history.history, f)
     
+    # Xception3d
     else:
         
         from xception3d import Xception
@@ -178,35 +222,10 @@ def train(model_name, data_path, epochs, save_path = None, val_cases = {1}):
             validation_steps = 10,
             epochs=epochs)
         
-        if save_path:
-            model.save_weights(save_path)
-        else:
-            model.save_weights('./weights/model.xception.weights.last.h5')
-            
-        del(model)
 
-def cross_calidation(data_path, epochs):
-    
-    if not os.path.exists('./cross_weights/'):
-        os.makedirs('./cross_weights/')
-        
-    # 5 fold for segmentation network
-    folds = [
-        {1,2,3},
-        {4,5,6},
-        {7,8,9},
-        {10,18,19},
-        {20,22,23}
-    ]
-    
-    for fold in folds:
-        print('======= Cross Validation: val = {} ======='.format(fold))
-        train(
-            model_name = 'deeplab',
-            data_path = data_path,
-            epochs = epochs,
-            save_path = './cross_weights/model.deeplab.weights.cross_val_{}.h5'.format(fold),
-            val_cases = fold)      
+        model.save_weights('./weights/model.xception.weights.last.h5')
+            
+        del(model)   
 
 def main():
     
@@ -248,9 +267,11 @@ def main():
             epochs = int(args.epochs))
     elif args.pos1 == 'cross':
         # python3 main.py cross -e 1 -gpu 1 -data ./data/seg_data_original
-        cross_calidation(
+        train(
+            model_name = 'deeplab',
             data_path = args.data_path,
-            epochs = int(args.epochs))
+            epochs = int(args.epochs),
+            cross = True)   
             
     
 
