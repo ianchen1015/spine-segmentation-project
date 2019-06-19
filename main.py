@@ -30,20 +30,6 @@ def load_filenames(data_path, val_cases = {}):
         else:
             training_filenames.append(f)
     return training_filenames, validation_filenames
-
-def save_weights(deeplab_model, weight_path):
-    file = h5py.File(weight_path,'w')
-    weight = deeplab_model.get_weights()
-    for i in range(len(weight)):
-        file.create_dataset('weight'+str(i),data=weight[i])
-    file.close()
-    
-def load_weights(deeplab_model, weight_path):
-    file=h5py.File(weight_path,'r')
-    weight = []
-    for i in range(len(file.keys())):
-        weight.append(file['weight'+str(i)][:])
-    deeplab_model.set_weights(weight)
     
 def train(model_name, data_path, epochs, val_cases = {1}, cross = False):
     
@@ -68,6 +54,20 @@ def train(model_name, data_path, epochs, val_cases = {1}, cross = False):
             backbone = 'xception',
             activation='sigmoid'
         )
+        
+        def save_weights(weight_path):
+            file = h5py.File(weight_path,'w')
+            weight = deeplab_model.get_weights()
+            for i in range(len(weight)):
+                file.create_dataset('weight'+str(i),data=weight[i])
+            file.close()
+
+        def load_weights(weight_path):
+            file=h5py.File(weight_path,'r')
+            weight = []
+            for i in range(len(file.keys())):
+                weight.append(file['weight'+str(i)][:])
+            deeplab_model.set_weights(weight)
 
         from tensorflow.python.keras.optimizers import Adam
 
@@ -89,8 +89,8 @@ def train(model_name, data_path, epochs, val_cases = {1}, cross = False):
         dice_score = dice_accu(smooth=1.)
 
         deeplab_model.compile(
-            optimizer = Adam(lr=1e-6),# 1e-4 #lr=7e-4, epsilon=1e-8, decay=1e-6),#1e-2
-            loss = model_dice,#'mse',
+            optimizer = Adam(lr=1e-5),# 1e-4 #lr=7e-4, epsilon=1e-8, decay=1e-6),#1e-2
+            loss = model_dice,
             metrics=['accuracy', dice_score])
 
         def windowing(img, lower, upper):
@@ -129,17 +129,16 @@ def train(model_name, data_path, epochs, val_cases = {1}, cross = False):
                     y_out[i] = y
 
                 yield (x_out, y_out)
-        
-        if cross:
-            save_weights(deeplab_model, './cross_weights/model.deeplab.weights.init.h5')
                 
         if cross:
+            save_weights('./cross_weights/model.deeplab.weights.init.h5')
+            
             folds = [
-                {1,2,3},
-                {4,5,6},
-                {7,8,9},
-                {10,18,19},
-                {20,22,23}
+                [1,2,3],
+                [4,5,6],
+                [7,8,9],
+                [10,18,19],
+                [20,22,23]
             ]
             
             # 5 fold for segmentation network
@@ -150,27 +149,27 @@ def train(model_name, data_path, epochs, val_cases = {1}, cross = False):
                 
                 history = deeplab_model.fit_generator(  
                     generator(1, training_filenames),
-                    steps_per_epoch=1,#400,
+                    steps_per_epoch=400,
                     validation_data=generator(2, validation_filenames),
-                    validation_steps = 1,#20,
+                    validation_steps = 20,
                     epochs=epochs)
                 
-                save_weights(deeplab_model, './cross_weights/model.deeplab.weights.cross_val_{}.h5'.format(fold))
+                save_weights('./cross_weights/model.deeplab.weights.cross_val_{}.h5'.format(fold))
 
                 with open('./cross_weights/deeplab.cross_val_{}.pkl'.format(fold), 'wb') as f:
                     pickle.dump(history.history, f)
                 
-                load_weights(deeplab_model, './cross_weights/model.deeplab.weights.init.h5')
+                load_weights('./cross_weights/model.deeplab.weights.init.h5')
                 
         else:
             history = deeplab_model.fit_generator(  
                 generator(1, training_filenames),
                 steps_per_epoch=400,
-                validation_data=generator(2, validation_filenames),
+                validation_data=generator(2, training_filenames),
                 validation_steps = 20,
                 epochs=epochs)
             
-            save_weights(deeplab_model, './weights/model.deeplab.weights.last.h5')
+            save_weights('./weights/model.deeplab.weights.last.h5')
             
             with open('./weights/deeplab.pkl', 'wb') as f:
                 pickle.dump(history.history, f)
@@ -240,33 +239,38 @@ def main():
     parser.add_argument('-gpu',
                         help='GPU number',
                         dest='gpu_number',
-                        default='0')
+                        default='-1')
     parser.add_argument('-data',
                         help='Data path',
                         dest='data_path')
     parser.add_argument('-e',
                         help='Epochs',
                         dest='epochs',
-                        default='100')
+                        default='150')
     
     args = parser.parse_args()
     #print("optional arg:", args)
     
     # GPU setup
     
-    os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu_number
+    if args.gpu_number == '-1':
+        os.environ["CUDA_VISIBLE_DEVICES"]="0,1"
+        print('use GPU 0 and 1')
+    else:
+        os.environ["CUDA_VISIBLE_DEVICES"]=args.gpu_number
+        
     tf.config.gpu.set_per_process_memory_growth(enabled=True)
     
     # Execution Mode
     
     if args.pos1 == 'train':
-        # python3 main.py train -m deeplab -gpu 1 -data ./data/seg_data_original
+        # python3 main.py train -m deeplab -gpu 0 -data ./data/seg_data_original
         train(
             model_name = args.model_name,
             data_path = args.data_path,
             epochs = int(args.epochs))
     elif args.pos1 == 'cross':
-        # python3 main.py cross -e 1 -gpu 1 -data ./data/seg_data_original
+        # python3 main.py cross -gpu 0 -data ./data/seg_data_original
         train(
             model_name = 'deeplab',
             data_path = args.data_path,
