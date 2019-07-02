@@ -91,3 +91,18 @@ SimpleITK (1.1.0)
 scipy (1.2.1)
 
 pydicom (1.2.2)
+
+cuda 9.0
+
+## Requirements
+
+### Ram
+
+Training: 9GB
+Testing: 7GB
+
+### Build
+
+You may need to makefile for darknet.
+
+
