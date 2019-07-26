@@ -8,6 +8,7 @@ This model segment  CT spine images automatically by three steps. First, locate 
 
 darknet/
 : (folder for YOLOv3 model)
+https://github.com/AlexeyAB/darknet
 
 data/
 : (folder for data)
